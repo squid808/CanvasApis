@@ -238,7 +238,7 @@ function Generate-CanvasAPIs (){
     $RiskHeader = @"
 <#
 
-I shold write something here to put in the beginning of the 
+I should write something here to put in the beginning of the 
 generated file so you know I did all the hard work.
   -squid808
 
@@ -255,11 +255,13 @@ generated file so you know I did all the hard work.
 
     $Generated = New-Object System.Collections.ArrayList
 
+    $Generated.Add($RiskHeader) | Out-Null
+
     $Methods | %{Write-CanvasAPI $_} | %{$Generated.Add($_) | Out-Null}
 
     return $Generated
 }
 
 #Example usage
-#$Apis = Generate-CanvasAPIs
+# $Apis = Generate-CanvasAPIs
 # Generate-CanvasAPIs | Set-Clipboard

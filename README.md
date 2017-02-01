@@ -5,6 +5,9 @@ This project contains a few separate approaches to the Canvas APIs (standard, an
 ##### Canvas API Generator
 This script aims to automate the creation of the bulk parts of the general Canvas API Client for PowerShell, by scraping the documentation pages and converting the HTML data in to formatted methods. It is not yet working, and has some issues that need to be addressed with multivalued or repeating properties.
 
+##### GeneratedCanvasAPIMethods
+This is a generated script containing methods that you can try to use along with the main methods in Canvas API Main. It contains a bunch of errors due to a too-simple generator and bad data scraping from the website.
+
 ##### Canvas API Main
 This script contains the primary authentication bits for the main Canvas API, as well as a number of manually thrown-together functions with no documentation.
 
