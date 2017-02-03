@@ -435,7 +435,7 @@ namespace CanvasData
         private static string dateRegexReplace = "";
 
         private static string trueRegexPattern = @"(?<=(^|\n|\t))true(?=($|\n|\t))";
-        private static string trueRegexReplace = "0";
+        private static string trueRegexReplace = "1";
 
         private static string falseRegexPattern = @"(?<=(^|\n|\t))false(?=($|\n|\t))";
         private static string falseRegexReplace = "0";
