@@ -52,7 +52,7 @@ function Get-CanvasDataHeader($ApiUri, $QueryParams){
         $QueryParamsString = ($QueryParams.GetEnumerator() | Sort-Object -Property Name | ForEach-Object {$_.Key + "=" + $_.Value}) -join "&"
     }
 
-    $message = "GET`nportal.inshosteddata.com`n`n`n$ApiUri`n$QueryParamsString`n$date`n$Secret"
+    $message = "GET`nportal.inshosteddata.com`n`n`n$ApiUri`n$QueryParamsString`n$date`n" + $KeyInfo.Secret
 
     $hmacsha = New-Object System.Security.Cryptography.HMACSHA256
     $hmacsha.key = [Text.Encoding]::ASCII.GetBytes($KeyInfo.Secret)
