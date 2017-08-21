@@ -1,267 +1,404 @@
 ﻿<#
  https://github.com/squid808/
- Use at your own risk and stuff
+ Use at your own risk and stuff.
 
- The main method is Generate-CanvasAPIs, which will call the URL for the canvas API website
- and proceed to parse it out, generating the PowerShell Client APIs for it.
+ The main method is Generate-CanvasApi, which will parse the Canvas Swagger file(s) and generate
+ the cmdlets based on that. It's up to you to do what you want with the file, but see a suggested
+ example at the bottom.
 
- The page it parses: https://canvas.instructure.com/doc/api/all_resources.html#method.admins.destroy
+ The verbs of the cmdlets are generated from the API Method - GET, PUT, POST, DELETE. I realize
+ these aren't posh-friendly, but it's not about PoSh, it's about usability.
+
+ The nouns of the cmdlets generated are based on the information in the Canvas API, and duplicates
+ are resolved with the information from the API URI, so if the URI path of a duplicate is:
+   /v1/accounts/{account_id}/users/{user_id}/account_notifications
+
+ The cmdlet noun will be:
+   AccountsUsersAccountNotificationsByAccountIdAndUserId
+
+ This will remain until someone can come up with a better way to do it :D
+
 #>
 
-#Take in the HTML for a method, and spit out the formatted code to make a method for it.
-function Write-CanvasAPI($Method) {
-    $HttpMethod, $Endpoint = ($Method.getElementsByClassName("endpoint") `
-        | select -first 1).innerText.Split(" ")
+$BaseUri = "https://canvas.instructure.com/doc/api"
 
-    $Endpoint = $Endpoint -join ""
+#region Helpers
+
+function ConvertTo-TitleCase ($String, $Delimiter){
+    $String = $String.ToLower()
     
-    $Description = $Method.childNodes | where {$_.tagName -eq "p"} `
-        | select -ExpandProperty innerText
+    if ($Delimiter -ne $null){
+        return ($String.Split($Delimiter) | %{(Get-Culture).TextInfo.ToTitleCase($_)}) -join ""
+    } else {
+        return (Get-Culture).TextInfo.ToTitleCase($String)
+    }
+}
 
-    $PathParams = if ($Endpoint.Contains(":")) {
-            $Endpoint.Split("/") | where {$_ -like ":*"} | % {(ToProper $_.Replace(":","")).Replace("_","")}
+function ConvertTo-Acronym ($String, $Delimiter){
+    return ($String.Split($Delimiter) | %{$_.ToUpper()[0]}) -join ""
+}
+
+#endregion
+
+#region Info Gathering
+function Get-AllApiDocs ($BaseUri) {
+    $ApisList = Invoke-RestMethod -Uri "$BaseUri/api-docs.json"
+
+    $ApisHash = @{}
+
+    $ApisList | Add-Member -MemberType NoteProperty -Name "apiHash" -Value $ApisHash
+
+    foreach ($SubApiList in $ApisList.apis) {
+        $Result = (Invoke-RestMethod -Uri ($BaseUri + $SubApiList.path))
+        $Result | Add-Member -MemberType NoteProperty -Name "parent" -Value $ApisList
+
+        $ApisHash.Add($SubApiList.Description.Replace(" ",""),$Result) | Out-Null
+        $SubApiList | Add-Member -MemberType NoteProperty -Name "api" -Value $Result
+
+        foreach ($Api in $SubApiList.api.apis) {
+            $Api | Add-Member -MemberType NoteProperty -Name "parent" -Value $SubApiList
         }
+    }
 
-    $Synopsis = $Method.getElementsByClassName("api_method_name").item().getElementsByTagName("a").item().innerText
+    return $ApisList
+}
+
+function Get-AllModelObjects ($Apis) {
     
-    $QueryParams = Parse-CanvasApiQueryParams $Method
+    $Models = @{}
 
-    $Verb = ToProper $HttpMethod
+    foreach ($Api in $Apis) {
+        if (($Api.models.PSObject.Properties | measure | select -ExpandProperty Count) -gt 0){
+        
+            foreach ($M in $Api.models.PSObject.Properties){
+                $Models.Add($M.Name, $M.Value) | Out-Null
+            }
+        }
+    }
 
-    $Noun = "Canvas" + (Get-CanvasNounFromEndpoint $Endpoint)
+    return $Models
+}
+
+function Get-AllMethodObjects($Apis){
     
-    $PoshMethod = "$Verb-$Noun"
+    $Methods = New-Object System.Collections.ArrayList
 
-    $Example = Make-CanvasApiExample $PoshMethod $PathParams $QueryParams
+    foreach ($Api in $Apis) {
 
-    $Params = Format-CanvasApiParams $PathParams $QueryParams
+        $ApiAcronym = ConvertTo-Acronym
 
-    $UriWithParams = Make-CanvasApiUriWithParams $Endpoint $PathParams
+        if ($Api.apis.Count -gt 0){
+        
+            foreach ($M in $Api.apis){
+                $Methods.Add($M) | Out-Null
+            }
+        }
+    }
 
-    $Body = Make-CanvasApiBody $QueryParams
+    return $Methods
 
-    $ReturnLine = "return Get-CanvasApiResult `$uri -Method $HttpMethod"
+}
 
-    if ($Body -ne $null) {$ReturnLine += " -RequestParameters `$Body"}
+function Get-CanvasApiData ($BaseUri) {
 
-    $functionText = @"
+    $Docs = Get-AllApiDocs $BaseUri
+
+
+
+}
+#endregion
+
+#region Methods
+
+function Convert-MethodToPosh ($Method) {
+    $MethodName = New-MethodName $Method
+
+    $String = @'
 <#
 .Synopsis
-   $Synopsis
-.DESCRIPTION
-   $Description
+   {0}
 .EXAMPLE
-   $Example
+   {6}
 #>
-function $PoshMethod {
-[CmdletBinding()]$Params
+function {1} {{{{
+[CmdletBinding()]
+{2}
 
-    $UriWithParams $Body
+    $Uri = "/api{3}"
 
-    $ReturnLine
+    {4}
+
+    return Get-CanvasApiResult $Uri -Method {5} -RequestParameters $Body
+
+}}}}
+'@ -f ($Method.description -replace "{","[" -replace "}","]"),
+        '{0}',
+        (Convert-MethodParamsToString $Method),
+        (Convert-MethodUri $Method),
+        (New-MethodBody $Method),
+        $Method.operations.method,
+        (New-MethodExample $Method)
+
+    return New-Object -TypeName psobject -Property (@{
+        name = $MethodName
+        body = $string
+    })
 }
 
+function New-MethodExample ($Method, $MethodName) {
 
-"@
+    $string = 'PS C:> {0}'
 
-    return $functionText
-}
-
-#Makes the strings to represent the query parameters in the form of the body
-function Make-CanvasApiBody($QueryParams){
-    if ($QueryParams -ne $null){
-        $result = New-Object System.Collections.ArrayList
-
-        $result.Add("`r`n`r`n`t`$Body = @{}") | Out-Null
-
-        foreach ($Q in $QueryParams) {
-            $N = $Q.name
-            $O = $Q.originalName
-
-            if ($Q.required) {
-                $result.Add("`$Body[`"$O`"] = `$$N") | Out-Null
-            } else {
-                $result.Add("if (`$$N) {`$Body[`"$O`"] = `$$N}") | Out-Null
-            }
-        }
-
-        return $result -join "`r`n`r`n`t"
+    if (($Method.operations.parameters | where {$_.required -eq $True} `
+        | Measure-Object | select -ExpandProperty Count) -eq 0) {
+        return $string
     }
-}
 
-#Makes the line that creates the URI variable, eg $uri = ...
-function Make-CanvasApiUriWithParams($Endpoint, $PathParams){
+    $params = New-Object System.Collections.ArrayList
     
-    $FormattedEndpoint = Parse-CanvasApiEndpointPath $Endpoint
-
-    $uriLine = '$uri = "' + $FormattedEndpoint + '"'
-
-    if ($PathParams -ne $null) {
-        $uriLine += " -f "
-
-        $ParamString = New-Object System.Collections.ArrayList
-
-        foreach ($P in $PathParams) {
-            $ParamString.Add("`$$P") | Out-Null
+    foreach ($P in $Method.operations.parameters) {
+        if ([bool]::Parse($P.required)) {
+            $PName = Convert-ParamNameToPoshString $P.name
+            $params.Add('-{0} $Some{0}Obj' -f $PName) | Out-Null
         }
-
-        $uriLine += $ParamString -join ", "
     }
 
-    return $uriLine
+    $string += " " + $params -join " "
+
+    return $string
 }
 
-#Creates the parameter list for the cmdlet
-function Format-CanvasApiParams($PathParams, $QueryParams) {
-    $paramstring = @"
-        # {0}
-        [Parameter(Mandatory=`${1})]
-        `${2}
-"@
+function New-MethodBody ($Method) {
+    if ($Method.operations.parameters.Count -eq 0) { return $null }
 
-    if ($PathParams -ne $null -or $QueryParams -ne $null){
+    $Params = New-Object System.Collections.ArrayList
+
+    foreach ($P in $Method.operations.parameters){
+        $Params.Add((New-MethodBodyParameter $P)) | Out-Null
+    }
+
+    $string = @'
+$Body = @{{{{}}}}
+
+{0}
+
+'@ -f ($Params -join "`r`n`r`n")
+
+    return $string
+}
+
+function New-MethodBodyParameter($Parameter) {
+
+    $ParamTitle = Convert-ParamNameToPoshString $Parameter.name
     
-        $results = New-Object System.Collections.ArrayList
+    $string = '$Body["{0}"] = ${1}' -f $Parameter.name, $ParamTitle
 
-        foreach ($P in $PathParams) {
-            $results.Add(($paramstring -f "The $P", 'true', "$P")) | Out-Null
-        }
-
-        foreach ($Q in $QueryParams) {
-            $results.Add(($paramstring -f ($Q.description -replace "`r`n","`r`n`t`t#"), `
-                $Q.required.ToString().ToLower(), $Q.name)) | Out-Null
-        }
-
-        $combined = $results -join ",`r`n`r`n"
-
-        return "`r`n`r`n`tParam`r`n`t(`r`n" + $combined + "`r`n`t)"
+    if (-not [bool]::Parse(($Parameter.required))) {
+        $string = 'if (${0}) {{{{ {1} }}}}' -f $ParamTitle, $string
     }
+
+    return "`t" + $string
 }
 
-#Sets a string to uppercase, with an option to remove underscores
-function ToProper($String,$RemoveUnderscores=$false) {
+#Get a string with Powershell variables in place of doc variables
+function Convert-MethodUri ($Method){
+    $Paths = $Method.path.Split("/")
 
-    if ($RemoveUnderscores) {
-        return ($String.Split("_") `
-            | %{(Get-Culture).TextInfo.ToTitleCase($_.ToLower())}) -join ""
+    for ($i = 0; $i -lt $Paths.Length; $i++){
+        if ($Paths[$i][0] -eq '{' -and $Paths[$i][-1] -eq '}'){
+            $Paths[$i] = '$' + (ConvertTo-TitleCase $Paths[$i].Replace('{','').Replace('}','') -Delimiter "_")
+        }
+    }
 
+    return $Paths -join "/"
+}
+
+#Creates the name of a PoSh function for a method call
+function New-MethodName ($Method){
+    $Verb = ConvertTo-TitleCase $Method.operations.method
+    
+    $End = if ($Method.path.Split("/")[-1] -match "{.*}") {
+        "By" + (ConvertTo-TitleCase ($Method.path.Split("/")[-1] -replace "[{}]",""))
+    }
+
+    $Type = $Method.operations.type
+    $Ref = $Method.operations.items.'$ref'
+
+    $Noun = if ($Type -eq "void") {
+        Get-MethodResourcePath $Method
     } else {
-        return (Get-Culture).TextInfo.ToTitleCase($String.ToLower())
-    }
-}
-
-#Creates the example text for the cmdlet
-function Make-CanvasApiExample($Method, $PathParams, $QueryParams){
-    $ex = "PS C:> $Method"
-
-    foreach ($P in $PathParams) {
-        $ex += (" -" + $P + " `$Some$P" + "Obj")
-    }
-
-    foreach ($Q in $QueryParams) {
-        $ex += (" -" + $Q.name + " `$Some" + $Q.name + "Obj")
-    }
-
-    return $ex
-}
-
-#Get a list of request params from the method
-function Parse-CanvasApiQueryParams($Method){
-    $results = new-object System.Collections.ArrayList
-
-    $paramsHtml = $Method.getElementsByClassName("request-param")
-
-    foreach ($p in $paramsHtml){
-        
-        if ($p.childNodes[0].innerText -Match "\[.+\]"){
-            $name = ToProper ($p.childNodes[0].innerText -replace ".*\[","" -replace "\]","") $true
-            $parent = ToProper ($p.childNodes[0].innerText -replace "\[.*","") $true
+        if ($Type -eq "array" -and $Ref -ne $null) {
+            $Method.operations.items.'$ref'
         } else {
-            $name = $p.childNodes[0].innerText
+            Get-MethodResourcePath $Method
         }
-
-        $obj = New-Object psobject -Property ([ordered]@{
-            name = $name
-            originalName = $p.childNodes[0].innerText
-            parent = $parent
-            required = if (-not [string]::IsNullOrWhiteSpace($p.childNodes[1].innerText)) {$true} else {$false}
-            type = ToProper $p.childNodes[2].innerText
-            description = $p.childNodes[3].innerText
-            isCollection = $false
-        })
-
-        if ($p.childNodes[0].innerText -match "\[\]"){
-            $obj.name = ToProper ($p.childNodes[0].innerText -replace "\[\]","") $true
-            $obj.isCollection = $true
-        }
-
-        $results.Add($obj) | Out-Null
     }
 
-    return $results
+    $Name = ($Verb + "-Canvas" + $Noun + $End) -replace "_",""
+
+    return $Name
 }
 
-#Pulls the Cmdlet Noun from the Endpoint
-function Get-CanvasNounFromEndpoint($Endpoint){
-    $result = ""
+function Get-MethodResourcePath ($Method){
+    return (ConvertTo-TitleCase $Method.parent.api.resourcePath.Replace("/","") -Delimiter "_")
+}
+
+#endregion
+
+#region Method Parameters
+
+#Convert all the params in a method to a param block
+function Convert-MethodParamsToString ($Method) {
+
+    if ($Method.operations.parameters.Count -eq 0) { return $null }
     
-    foreach($E in ($Endpoint.Replace("/api/v1/","").Split("/"))) { 
-        if (-not ($E.Contains(":") -or $E.Contains("*"))){
-            if ($E.Contains("_")){
-                $E.Split("_") | %{$result += (ToProper $_)}
-            } else {
-                $result += ToProper $E
+    $Params = $Method.operations.parameters
+
+    $ParamsString = New-Object System.Collections.ArrayList
+
+    foreach ($P in $Params){
+        $ParamsString.Add((New-MethodParamString $P)) | Out-Null
+    }
+
+    $ParamString = @'
+    Param (
+{0}
+    )
+'@ -f ($ParamsString -join ",`r`n`r`n")
+
+
+    return $ParamString
+}
+
+#Create a string for a single param from a method
+function New-MethodParamString ($Param) {
+    $PString =  @'
+        # {0}
+        [Parameter(Mandatory=${1})]
+        {3} ${2}
+'@ -f (Format-ParamDescription $Param.description), $Param.required, (Convert-ParamNameToPoshString $Param.name),
+    (Get-MethodParamTypeForPosh $Param)
+
+    return $PString
+}
+
+#removes the description's curly brackets and adds a hash tag to the beginning of each line
+function Format-ParamDescription ($ParamDescription){
+    $ParamDescription = $ParamDescription.Split("`r`n") -join "`r`n`t`t# " -replace "{","[" -replace "}","]"
+
+    return $ParamDescription
+}
+
+#remove non-alphanumeric characters from the string
+function Convert-ParamNameToPoshString ($ParamName){
+    (ConvertTo-TitleCase $ParamName "_") -replace "\W|_",""
+}
+
+#Converts known object types to the posh types, for method parameters
+function Get-MethodParamTypeForPosh ($Param){
+    switch ($Param.type){
+        "Float" { "[float]" }
+        "string" { "[string]" }
+        "boolean" {"[bool]"}
+        "integer" {"[int]"}
+        default {$null}
+    }
+}
+
+#Takes a method and provides a new method name by path.
+function MakeUniqueCmdletName($Method){
+    $Words = @()
+    $Params = @()
+    $Split = $Method.method.path.Split("/")
+
+    for ($i = 2; $i -lt $Split.Count; $i++){
+    #foreach ($P in $Split){
+        if ($Split[$i] -match"{.*}"){
+            $Params += (ConvertTo-TitleCase ($Split[$i] -replace "[{}]","") "_")
+        } elseif (-not [string]::IsNullOrWhiteSpace($Split[$i])){
+            $Words += (ConvertTo-TitleCase $Split[$i] "_")
+        }
+    }
+
+    $Noun = ($Words -join "")
+    if ($Params.Count -gt 0) {
+        $Noun += ("By" + ($Params -join "And"))
+    }
+
+    $Noun = $Noun -replace "_",""
+
+    return (ConvertTo-TitleCase $Method.method.operations.method.ToLower()) + "-Canvas" + $Noun
+}
+
+#endregion
+
+function Generate-CanvasApi ($ResultPath) {
+    #Gather all of the API information from the Swagger Resources
+    $Api = Get-AllApiDocs $BaseUri
+
+    $PoshMethodsInOrder = New-Object System.Collections.ArrayList
+    $MethodsByName = @{}
+    $Regions = @{}
+
+    #Format each method into a string ready to be formatted with the cmdlet name, once we establish it
+    foreach ($A in $Api.apis) {
+
+        foreach ($Method in $A.api.apis){
+            $M = (Convert-MethodToPosh $Method)
+            $M | Add-Member -MemberType NoteProperty -Name "method" -Value $Method
+            $PoshMethodsInOrder.Add($M) | Out-Null
+            if (-not $MethodsByName.ContainsKey($M.name)){
+                $MethodsByName.Add($M.name, (New-Object System.Collections.ArrayList)) | Out-Null
             }
+            $MethodsByName[$M.name].Add($M) | Out-Null
         }
     }
 
-    return $result -replace "[^a-zA-Z]"
-}
-
-#Formats the Endpoint for the Cmdlet with string formatting ready
-function Parse-CanvasApiEndpointPath($Endpoint){
-    $ind = 0
-    $Endpoints = $Endpoint.Split("/")
-    
-    for ($i = 0; $i -lt $Endpoints.Count; $i++){
-        if ($Endpoints[$i].Contains(":") -or $Endpoints[$i].Contains("*")){
-            $Endpoints[$i] = "{$ind}"
-            $ind++
+    #now find any duplicate cmdlet names, make those unique and throw them in to a region collection
+    foreach ($M in $PoshMethodsInOrder) {
+        if ($MethodsByName[$M.name].Count -gt 1){
+            $M.name = MakeUniqueCmdletName $M
         }
+
+        if (-not $Regions.ContainsKey($M.method.parent.description)){
+            $Regions.Add($M.method.parent.description, (New-Object System.Collections.ArrayList))
+        }
+
+        $Regions[$M.method.parent.description].Add(($M.body -f $M.name)) | Out-Null
     }
 
-    return $Endpoints -join "/"
-}
+    #Now create the document
+    $Doc = New-Object System.Collections.ArrayList
 
-#Parse through the canvas API website and generate the methods based on that
-function Generate-CanvasAPIs (){
-    $RiskHeader = @"
+    $Doc.Add(@"
 <#
 
-I should write something here to put in the beginning of the 
-generated file so you know I did all the hard work.
-  -squid808
+Generated by the Canvas PowerShell API Generator, by Spencer Varney
 
+{0}
 
-#>   
-"@ 
+Use at your own risk!
 
-    #Get the page HTML
-    $CanvasApiPage = Invoke-WebRequest https://canvas.instructure.com/doc/api/all_resources.html
+#>
+"@ -f (Get-Date))
 
-    #Get the methods from the page
-    $Methods = $CanvasApiPage.ParsedHtml.getElementsByTagName("div") | `
-        where {$_.className -like "method_details*" -and $_.className -notlike "*_list"}
+    #Add the manually created main API call methods
+    $CM = get-content .\CanvasApiMain.ps1
+    $Doc.Add($CM[($CM.IndexOf("#>") + 2)..($CM.Length-1)] -join "`r`n") | Out-Null
 
-    $Generated = New-Object System.Collections.ArrayList
+    #Add and compile each of the regions
+    foreach ($K in ($Regions.Keys | Sort)) {
+        $Doc.Add(("#region $K`r`n`r`n" + ($Regions[$K] -join "`r`n`r`n") + "`r`n`r`n#endregion")) | Out-Null
+    }
 
-    $Generated.Add($RiskHeader) | Out-Null
+    $Doc = $Doc -join "`r`n`r`n"
 
-    $Methods | %{Write-CanvasAPI $_} | %{$Generated.Add($_) | Out-Null}
-
-    return $Generated
+    return $Doc
 }
 
-#Example usage
-# $Apis = Generate-CanvasAPIs
-# Generate-CanvasAPIs | Set-Clipboard
+<#
+ $Generated = Generate-CanvasApi
+ $Generated | Out-File ".\PoshCanvas.ps1"
+ or
+ $Generated | Set-Clipboard
+#>

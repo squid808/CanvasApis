@@ -2,8 +2,8 @@
  https://github.com/squid808/
  Use at your own risk and stuff
 
- This project contains wrapper methods for the Canvas Data APIs as well
- as a number of helper methods.
+ This project contains separate wrapper methods for the Canvas Data APIs as well
+ as a number of helper methods. This was manually written.
 
  Based on https://portal.inshosteddata.com/docs/api
 #>
