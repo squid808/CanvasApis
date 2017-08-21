@@ -8,12 +8,13 @@ No. You'll have to generate it yourself for now.
 
 ## How To Use
 Clone this repository. Open the CanvasApiGenerator.ps1 file, and call Generate-CanvasApi. This Cmdlet will return the generated document so you can do with it whatever you'd like, for instance:
-`
+
+```
 $Generated = Generate-CanvasApi
 $Generated | Out-File ".\PoshCanvas.ps1"
 #or
 $Generated | Set-Clipboard
-`
+```
 
 Then run one of the methods, and it *should* work. If not, this is open source. Let me know or fix it yourself :)
 
