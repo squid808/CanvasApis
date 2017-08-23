@@ -53,11 +53,13 @@ function Get-CanvasApiResult(){
 
     if ($RequestParameters -eq $null) { $RequestParameters = @{} }
 
-    #$RequestParameters["per_page"] = "10000"
+    $RequestParameters["per_page"] = "10000"
+
+    $Headers = (Get-CanvasAuthHeader $AuthInfo.Token)
 
     try {
     $Results = Invoke-WebRequest -Uri ($AuthInfo.BaseUri + $Uri) -ContentType "multipart/form-data" `
-        -Headers (Get-CanvasAuthHeader $AuthInfo.Token) -Method $Method -Body $RequestParameters 
+        -Headers $headers -Method $Method -Body $RequestParameters 
     } catch {
         throw $_.Exception.Message
     }
@@ -74,13 +76,11 @@ function Get-CanvasApiResult(){
     $JsonResults.AddRange(($Results.Content | ConvertFrom-Json))
 
     if ($Results.Headers.link -ne $null) {
-        $LastUriLine = $Results.Headers.link.Split(",") | where {$_.Contains("rel=`"last`"")}
+        $NextUriLine = $Results.Headers.link.Split(",") | where {$_.Contains("rel=`"next`"")}
 
-        $LastPageNum = $LastUriLine.Substring($LastUriLine.IndexOf("page=")+5) -replace '(\D).*',""
+        $PerPage = $NextUriLine.Substring($NextUriLine.IndexOf("per_page=")+9) -replace '(\D).*',""
 
-        $PerPage = $LastUriLine.Substring($LastUriLine.IndexOf("per_page=")+9) -replace '(\D).*',""
-
-        if ($LastPageNum -ne 1) {
+        if (-not [string]::IsNullOrWhiteSpace($NextUriLine)) {
             while ($Results.Headers.link.Contains("rel=`"next`"")) {
         
                 $nextUri = $Results.Headers.link.Split(",") | `
@@ -91,7 +91,7 @@ function Get-CanvasApiResult(){
                 #Write-Progress
                 Write-Host $nextUri
         
-                $Results = Invoke-WebRequest -Uri $nextUri -Headers $headers -Method Get -Body $RequestParameters
+                $Results = Invoke-WebRequest -Uri $nextUri -Headers $headers -Method Get -Body $RequestParameters -ContentType "multipart/form-data" `
     
                 $JsonResults.AddRange(($Results.Content | ConvertFrom-Json))
             }
