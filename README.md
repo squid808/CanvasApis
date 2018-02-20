@@ -32,3 +32,6 @@ This script contains the primary authentication bits and API calls for the main 
 This script contains wrappers for the Canvas Data API and some companion functions that can be used to ease the burden of working with the Canvas Data APIs.
 
 Good luck, and enjoy!
+
+## Notes about uploading files
+Apparently to upload files for things like the SIS import you may need to provide a different body field name than is provided in the documentation. For instance, in the documentation to POST an SIS Import it says to make the file 'attachment' when it actually needs to be 'file' per PowerShell's handling, I guess. I didn't look in to it too much, but an example can be found in this [Gist for Post-CanvasSisImports](https://gist.github.com/squid808/4cf31d1419a0a4771bb271eb6a32366a). Additionally the logic to read the files in isn't included in the generated code and needs to be added.
