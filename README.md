@@ -34,4 +34,6 @@ This script contains wrappers for the Canvas Data API and some companion functio
 Good luck, and enjoy!
 
 ## Notes about uploading files
-Apparently to upload files for things like the SIS import you may need to provide a different body field name than is provided in the documentation. For instance, in the documentation to POST an SIS Import it says to make the file 'attachment' when it actually needs to be 'file' per PowerShell's handling, I guess. I didn't look in to it too much, but an example can be found in this [Gist for Post-CanvasSisImports](https://gist.github.com/squid808/4cf31d1419a0a4771bb271eb6a32366a). Additionally the logic to read the files in isn't included in the generated code and needs to be added.
+Apparently to upload files for things like the SIS import you may need to handle the uploading outside of the generic methods provided by PowerShell; this is to allow the uploading of both params and files for a multipart/form-data request. For an example on how to handle this, please see a manually corrected version of Post-CanvasSisImports in this [Gist for Post-CanvasSisImports](https://gist.github.com/squid808/4cf31d1419a0a4771bb271eb6a32366a). Again, please note that this kind of method handling would be needed for any functions wherein you are uploading files, though I have not tested any others.
+
+If you only need to upload a file with no params, you can simply use Invoke-Webrequest with the -InFile param.
