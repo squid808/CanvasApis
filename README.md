@@ -1,3 +1,6 @@
+# No Longer Maintained, sorry!
+Due to some life changes I no longer work with PowerShell. As a result this library is not maintained or updated, and should be used with caution. If anyone would like to fork and update for maintenance, please let me know and I'll happily link out, as I still believe there is value in this kind of project!
+
 # Canvas APIs for PowerShell
 
 ## About
